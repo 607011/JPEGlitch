@@ -53,13 +53,16 @@ static uint8_t *make_source_jpeg(size_t *out_size)
 /* Mirrors the fallback strategy from the project spec: try to decode the
  * glitched buffer; on a fatal error, fall back to the last known-good
  * image (here: the un-glitched source). Always succeeds. */
-static void decode_with_fallback(tjhandle dec, const uint8_t *glitched, size_t glitched_size, const uint8_t *good,
+static void decode_with_fallback(tjhandle *dec, const uint8_t *glitched, size_t glitched_size, const uint8_t *good,
 				 size_t good_size, uint8_t **buf, size_t *cap)
 {
 	int w, h;
-	int rc = jpeglitch_codec_decode(dec, glitched, glitched_size, TJPF_RGB, buf, cap, &w, &h);
+	int rc = jpeglitch_codec_decode(*dec, glitched, glitched_size, TJPF_RGB, buf, cap, &w, &h);
 	if (rc < 0) {
-		rc = jpeglitch_codec_decode(dec, good, good_size, TJPF_RGB, buf, cap, &w, &h);
+		tj3Destroy(*dec);
+		*dec = tj3Init(TJINIT_DECOMPRESS);
+		CHECK(*dec != NULL);
+		rc = jpeglitch_codec_decode(*dec, good, good_size, TJPF_RGB, buf, cap, &w, &h);
 		CHECK(rc >= 0);
 	}
 	CHECK(w == W && h == H);
@@ -104,7 +107,7 @@ int main(void)
 					jpeglitch_result res = jpeglitch_glitch(raw, source_size, &params, &state);
 					CHECK(res == JPEGLITCH_OK);
 
-					decode_with_fallback(dec, raw, source_size, source, source_size, &buf, &cap);
+					decode_with_fallback(&dec, raw, source_size, source, source_size, &buf, &cap);
 
 					free(raw);
 				}
