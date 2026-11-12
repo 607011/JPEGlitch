@@ -10,7 +10,10 @@ if(NOT TARGET jpeglitch-glitch-core)
   add_library(jpeglitch-glitch-core STATIC jpeglitch_core.c jpeglitch_mt19937.c)
   target_include_directories(jpeglitch-glitch-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
   target_link_libraries(jpeglitch-glitch-core PUBLIC m)
-  set_target_properties(jpeglitch-glitch-core PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
+  set_target_properties(
+    jpeglitch-glitch-core
+    PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON
+  )
 
   option(JPEGLITCH_BUILD_TESTS "Build jpeglitch-glitch-core unit tests" ${PROJECT_IS_TOP_LEVEL})
   if(JPEGLITCH_BUILD_TESTS)

@@ -14,8 +14,9 @@ if(NOT EXISTS "${JPEGLITCH_STB_HEADER}")
   file(MAKE_DIRECTORY "${JPEGLITCH_STB_DIR}")
   message(STATUS "jpeglitch: downloading stb_image_write.h@${JPEGLITCH_STB_COMMIT}")
   file(
-    DOWNLOAD "https://raw.githubusercontent.com/nothings/stb/${JPEGLITCH_STB_COMMIT}/stb_image_write.h"
-    "${JPEGLITCH_STB_HEADER}"
+    DOWNLOAD
+      "https://raw.githubusercontent.com/nothings/stb/${JPEGLITCH_STB_COMMIT}/stb_image_write.h"
+      "${JPEGLITCH_STB_HEADER}"
     TLS_VERIFY ON
   )
 endif()
