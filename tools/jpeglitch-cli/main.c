@@ -253,6 +253,12 @@ int main(int argc, char **argv)
 	if (decode_rgb(dec, raw, source_size, &rgb, &w, &h) != 0) {
 		fprintf(stderr,
 			"warning: glitched JPEG could not be decoded at all, falling back to the un-glitched source\n");
+		tj3Destroy(dec);
+		dec = tj3Init(TJINIT_DECOMPRESS);
+		if (!dec) {
+			fprintf(stderr, "error: tj3Init failed for fallback decode\n");
+			return 1;
+		}
 		if (decode_rgb(dec, source_jpeg, source_size, &rgb, &w, &h) != 0) {
 			fprintf(stderr, "error: fallback decode also failed\n");
 			return 1;

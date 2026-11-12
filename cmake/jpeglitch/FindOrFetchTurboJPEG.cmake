@@ -34,6 +34,31 @@ else()
   find_package(PkgConfig QUIET)
   if(PkgConfig_FOUND)
     pkg_check_modules(JPEGLITCH_PC_TURBOJPEG QUIET libturbojpeg)
+    if(JPEGLITCH_PC_TURBOJPEG_FOUND)
+      include(CheckCSourceCompiles)
+      set(_jpeglitch_saved_required_includes "${CMAKE_REQUIRED_INCLUDES}")
+      set(CMAKE_REQUIRED_INCLUDES "${JPEGLITCH_PC_TURBOJPEG_INCLUDE_DIRS}")
+      check_c_source_compiles(
+        "
+        #include <turbojpeg.h>
+        #ifndef TJPARAM_STOPONWARNING
+        #error \"libturbojpeg is missing the TurboJPEG-3 API\"
+        #endif
+        int main(void) {
+          tjhandle (*init_fn)(int) = tj3Init;
+          int (*set_fn)(tjhandle, int, int) = tj3Set;
+          tjhandle h = init_fn(TJINIT_DECOMPRESS);
+          return set_fn(h, TJPARAM_STOPONWARNING, 0);
+        }
+        "
+        JPEGLITCH_PC_TURBOJPEG_HAS_TJ3_API
+      )
+      set(CMAKE_REQUIRED_INCLUDES "${_jpeglitch_saved_required_includes}")
+      if(NOT JPEGLITCH_PC_TURBOJPEG_HAS_TJ3_API)
+        set(JPEGLITCH_PC_TURBOJPEG_FOUND FALSE)
+        message(STATUS "jpeglitch: system libjpeg-turbo lacks tj3 API; building from source")
+      endif()
+    endif()
   endif()
 endif()
 
