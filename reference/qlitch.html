@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qlitch – JPEG-Glitch im Browser</title>
+<style>
+  :root {
+    --bg: #0b0b0d;
+    --panel: #16161a;
+    --line: #2a2a31;
+    --fg: #e8e8ea;
+    --dim: #8a8a94;
+    --acc: #ff2e63;
+    --acc2: #08d9d6;
+    color-scheme: dark;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); }
+  body {
+    display: grid;
+    grid-template-rows: auto 1fr auto auto;
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+    padding: .5rem .75rem;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  .logo {
+    font-weight: 800; font-size: 1.15rem; letter-spacing: .06em;
+    margin-right: .5rem;
+    text-shadow: 2px 0 var(--acc), -2px 0 var(--acc2);
+  }
+  .spacer { flex: 1; }
+  .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 .2rem; }
+
+  button {
+    background: #222228; color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: .35rem .7rem;
+    font: inherit; font-size: .9rem;
+    cursor: pointer;
+  }
+  button:hover { border-color: #55555f; }
+  button:focus-visible { outline: 2px solid var(--acc2); outline-offset: 1px; }
+  button[aria-pressed="true"] { background: var(--acc); border-color: var(--acc); color: #fff; }
+  .group { display: inline-flex; }
+  .group button { border-radius: 0; margin-left: -1px; }
+  .group button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+  .group button:last-child { border-radius: 0 6px 6px 0; }
+  .group-label { font-size: .8rem; color: var(--dim); margin-right: .3rem; }
+
+  main { position: relative; overflow: hidden; background: #000; min-height: 200px; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+  .help {
+    position: absolute; top: 8px; width: 230px;
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, .55); color: #fff;
+    font-size: .8rem; line-height: 1.35;
+    border-radius: 4px;
+    pointer-events: none;
+  }
+  .help.left { left: 8px; }
+  .help.right { right: 8px; text-align: right; font-variant-numeric: tabular-nums; }
+  body:not(.show-help) .help { display: none; }
+  .drop {
+    position: absolute; inset: 0;
+    display: none; place-items: center;
+    background: rgba(255, 46, 99, .15);
+    border: 3px dashed var(--acc);
+    font-size: 1.4rem; font-weight: 600;
+    pointer-events: none;
+  }
+  main.dragging .drop { display: grid; }
+
+  .controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: .45rem 1.5rem;
+    padding: .65rem .75rem;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+  }
+  .ctl { display: grid; grid-template-columns: 6.5rem 1fr 4.8rem; align-items: center; gap: .5rem; font-size: .9rem; }
+  .ctl output { text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
+  input[type="range"] { width: 100%; accent-color: var(--acc); }
+  input[type="range"]:disabled { opacity: .35; }
+  .options { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; }
+  label.chk { display: inline-flex; align-items: center; gap: .35rem; font-size: .88rem; cursor: pointer; user-select: none; }
+  label.chk input { accent-color: var(--acc); }
+  kbd {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .75em;
+    padding: 0 .3em; border: 1px solid var(--line); border-radius: 3px; color: var(--dim);
+  }
+
+  footer {
+    display: flex; justify-content: space-between; gap: 1rem;
+    padding: .25rem .75rem; min-height: 1.6rem;
+    font-size: .8rem; color: var(--dim);
+    background: #0f0f12; border-top: 1px solid var(--line);
+  }
+  #status.error { color: var(--acc); }
+
+  dialog {
+    max-width: 34rem;
+    background: var(--panel); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    line-height: 1.5; font-size: .92rem;
+  }
+  dialog::backdrop { background: rgba(0, 0, 0, .6); }
+  dialog h2 { margin-top: 0; text-shadow: 2px 0 var(--acc), -2px 0 var(--acc2); }
+  dialog a { color: var(--acc2); }
+  dialog table { border-collapse: collapse; margin: .5rem 0; }
+  dialog td { padding: .1rem .8rem .1rem 0; }
+
+  @media (max-width: 640px) {
+    .ctl { grid-template-columns: 5.5rem 1fr 4.2rem; }
+    .help { width: 170px; font-size: .72rem; }
+  }
+</style>
+</head>
+<body class="show-help">
+
+<header>
+  <span class="logo">QLITCH</span>
+  <button id="btnOpen" title="Bild öffnen (Strg+O)">Öffnen …</button>
+  <button id="btnSave" title="Als PNG speichern (Strg+S)">Speichern</button>
+  <button id="btnSaveRaw" title="Kaputte JPEG-Rohdaten speichern">Roh-JPEG</button>
+  <span class="sep"></span>
+  <button id="btnCopy" title="Bild in die Zwischenablage kopieren (Strg+C)">Kopieren</button>
+  <button id="btnPaste" title="Bild aus der Zwischenablage einfügen (Strg+V)">Einfügen</button>
+  <button id="btnWebcam" title="Webcam-Bild live glitchen (W)" aria-pressed="false">Webcam</button>
+  <span class="sep"></span>
+  <span class="group-label">Algorithmus</span>
+  <span class="group" role="group" aria-label="Algorithmus">
+    <button data-alg="xor" title="Bit kippen (X)">XOR</button>
+    <button data-alg="one" title="Bit setzen (1)">Eins</button>
+    <button data-alg="zero" title="Bit löschen (0)">Null</button>
+  </span>
+  <span class="spacer"></span>
+  <button id="btnGlitch" title="Neu würfeln (Leertaste oder Mausrad)">Neu glitchen</button>
+  <button id="btnAbout" title="Über Qlitch">?</button>
+  <input type="file" id="fileInput" accept="image/*" hidden>
+</header>
+
+<main id="stage">
+  <canvas id="view"></canvas>
+  <div class="help left" id="helpText">Klicken und ziehen, um die Glitch-Position zu wählen. Mausrad oder Leertaste würfelt neu.</div>
+  <div class="help right" id="posBox">Position: 0 %</div>
+  <div class="drop">Bild hier fallen lassen</div>
+</main>
+
+<section class="controls">
+  <div class="ctl">
+    <label for="percentage" title="Ab welcher Stelle der Bilddaten manipuliert wird">Start</label>
+    <input type="range" id="percentage" min="1" max="10000" value="60">
+    <output id="percentageOut"></output>
+  </div>
+  <div class="ctl">
+    <label for="iterations" title="Anzahl manipulierter Bytes">Defekte</label>
+    <input type="range" id="iterations" min="0" max="200" value="100">
+    <output id="iterationsOut"></output>
+  </div>
+  <div class="ctl">
+    <label for="quality" title="JPEG-Qualität vor dem Glitchen">Qualität</label>
+    <input type="range" id="quality" min="0" max="100" value="50">
+    <output id="qualityOut"></output>
+  </div>
+  <div class="ctl">
+    <label for="seed" title="Startwert des Zufallszahlengenerators">Seed</label>
+    <input type="range" id="seed" min="0" max="100000000" value="10000">
+    <output id="seedOut"></output>
+  </div>
+  <div class="options">
+    <label class="chk"><input type="checkbox" id="fixedSeed"> Fester Seed</label>
+    <label class="chk"><input type="checkbox" id="singleBit"> Einzelbit-Modus <kbd>M</kbd></label>
+    <label class="chk"><input type="checkbox" id="preventFF" checked> 0xFF-Bytes verhindern</label>
+    <label class="chk"><input type="checkbox" id="leaveFF" checked> 0xFF-Bytes nicht anfassen</label>
+    <label class="chk"><input type="checkbox" id="showHelp" checked> Hilfe einblenden <kbd>H</kbd></label>
+  </div>
+</section>
+
+<footer>
+  <span id="status">Bereit.</span>
+  <span id="info"></span>
+</footer>
+
+<dialog id="about">
+  <h2>Qlitch</h2>
+  <p><b>Qlitch</b> erzeugt den typischen JPEG-Glitch-Effekt: Das Bild wird als JPEG kodiert,
+     danach werden in den komprimierten Bilddaten zufällig Bits gekippt, gesetzt oder gelöscht,
+     und das Ergebnis wird wieder dekodiert.</p>
+  <table>
+    <tr><td><kbd>Leertaste</kbd> / Mausrad</td><td>neu würfeln</td></tr>
+    <tr><td><kbd>X</kbd> <kbd>1</kbd> <kbd>0</kbd></td><td>Algorithmus XOR / Eins / Null</td></tr>
+    <tr><td><kbd>M</kbd></td><td>Einzelbit-Modus</td></tr>
+    <tr><td><kbd>W</kbd></td><td>Webcam an/aus (Leertaste friert dann das Bild ein)</td></tr>
+    <tr><td><kbd>H</kbd></td><td>Hilfe ein/aus</td></tr>
+    <tr><td><kbd>Strg</kbd>+<kbd>O</kbd> / <kbd>S</kbd></td><td>öffnen / speichern</td></tr>
+    <tr><td><kbd>Strg</kbd>+<kbd>C</kbd> / <kbd>V</kbd></td><td>kopieren / einfügen</td></tr>
+  </table>
+  <p>Web-Portierung der Qt-Anwendung von
+     <a href="https://github.com/607011/qlitch" target="_blank" rel="noopener">github.com/607011/qlitch</a>.<br>
+     Copyright © 2013 Oliver Lau, Heise Zeitschriften Verlag.</p>
+  <p>Dieses Programm ist freie Software unter der
+     <a href="https://www.gnu.org/licenses/gpl-3.0" target="_blank" rel="noopener">GNU General Public License v3</a>
+     oder (nach Wahl) einer späteren Version – ohne jede Gewährleistung.</p>
+  <form method="dialog" style="text-align:right"><button>Schließen</button></form>
+</dialog>
+
+<script>
+'use strict';
+
+/* ---------- Mersenne Twister (MT19937) ---------- */
+class MersenneTwister {
+  constructor(seed) {
+    this.mt = new Uint32Array(624);
+    this.idx = 624;
+    this.seed(seed === undefined ? (Math.random() * 0x100000000) >>> 0 : seed);
+  }
+  seed(s) {
+    const mt = this.mt;
+    mt[0] = s >>> 0;
+    for (let i = 1; i < 624; ++i) {
+      const p = mt[i - 1] ^ (mt[i - 1] >>> 30);
+      mt[i] = (Math.imul(1812433253, p) + i) >>> 0;
+    }
+    this.idx = 624;
+  }
+  next() {
+    const mt = this.mt;
+    if (this.idx >= 624) {
+      for (let k = 0; k < 624; ++k) {
+        const y = (mt[k] & 0x80000000) | (mt[(k + 1) % 624] & 0x7fffffff);
+        mt[k] = mt[(k + 397) % 624] ^ (y >>> 1) ^ ((y & 1) ? 0x9908b0df : 0);
+      }
+      this.idx = 0;
+    }
+    let y = mt[this.idx++];
+    y ^= y >>> 11;
+    y ^= (y << 7) & 0x9d2c5680;
+    y ^= (y << 15) & 0xefc60000;
+    y ^= y >>> 18;
+    return y >>> 0;
+  }
+  int(lo, hi) {
+    if (lo > hi) [lo, hi] = [hi, lo];
+    return lo + this.next() % (hi - lo + 1);
+  }
+}
+
+/* ---------- Elemente & Zustand ---------- */
+const $ = id => document.getElementById(id);
+const ui = {
+  stage: $('stage'), canvas: $('view'), posBox: $('posBox'),
+  percentage: $('percentage'), iterations: $('iterations'), quality: $('quality'), seed: $('seed'),
+  fixedSeed: $('fixedSeed'), singleBit: $('singleBit'), preventFF: $('preventFF'),
+  leaveFF: $('leaveFF'), showHelp: $('showHelp'),
+  status: $('status'), info: $('info'), fileInput: $('fileInput'), about: $('about'),
+};
+const ctx = ui.canvas.getContext('2d');
+const rng = new MersenneTwister();
+
+const state = {
+  algorithm: 'xor',
+  flipBit: 0,
+  source: null,          // Canvas mit dem Originalbild
+  sourceName: 'qlitch',
+  encoded: null,         // Uint8Array: unverändertes JPEG (Cache)
+  encodedQuality: -1,
+  glitched: null,        // ImageBitmap oder HTMLImageElement
+  glitchedRaw: null,     // Blob des kaputten JPEGs
+  dest: { x: 0, y: 0, w: 0, h: 0 },
+  pointerDown: false,
+  webcam: null,          // { stream, video, prevSource, prevName, frozen, frames, t0 }
+};
+
+/* ---------- Statusleiste ---------- */
+let statusTimer = 0;
+function status(msg, { error = false, timeout = 3000 } = {}) {
+  ui.status.textContent = msg;
+  ui.status.classList.toggle('error', error);
+  clearTimeout(statusTimer);
+  if (timeout) statusTimer = setTimeout(() => { ui.status.textContent = ''; ui.status.classList.remove('error'); }, timeout);
+}
+
+/* ---------- Einstellungen ---------- */
+const SETTINGS_KEY = 'qlitch.settings.v1';
+function saveSettings() {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      algorithm: state.algorithm,
+      percentage: +ui.percentage.value, iterations: +ui.iterations.value,
+      quality: +ui.quality.value, seed: +ui.seed.value,
+      fixedSeed: ui.fixedSeed.checked, singleBit: ui.singleBit.checked,
+      preventFF: ui.preventFF.checked, leaveFF: ui.leaveFF.checked, showHelp: ui.showHelp.checked,
+    }));
+  } catch (_) { /* Speicher nicht verfügbar – egal */ }
+}
+function restoreSettings() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(SETTINGS_KEY)); } catch (_) { /* ignorieren */ }
+  if (!s) return;
+  for (const k of ['percentage', 'iterations', 'quality', 'seed'])
+    if (typeof s[k] === 'number') ui[k].value = s[k];
+  for (const k of ['fixedSeed', 'singleBit', 'preventFF', 'leaveFF', 'showHelp'])
+    if (typeof s[k] === 'boolean') ui[k].checked = s[k];
+  if (['xor', 'one', 'zero'].includes(s.algorithm)) state.algorithm = s.algorithm;
+}
+
+/* ---------- Anzeige der Werte ---------- */
+function relPosition() {
+  const p = ui.percentage;
+  return (p.value - p.min) / (p.max - p.min);
+}
+function syncUi() {
+  $('percentageOut').textContent = (100 * relPosition()).toFixed(2) + ' %';
+  $('iterationsOut').textContent = ui.iterations.value;
+  $('qualityOut').textContent = ui.quality.value;
+  $('seedOut').textContent = ui.seed.value;
+  ui.posBox.textContent = 'Position: ' + (100 * relPosition()).toFixed(2) + ' %';
+  ui.seed.disabled = !ui.fixedSeed.checked;
+  ui.iterations.disabled = ui.singleBit.checked;
+  document.body.classList.toggle('show-help', ui.showHelp.checked);
+  for (const b of document.querySelectorAll('[data-alg]'))
+    b.setAttribute('aria-pressed', String(b.dataset.alg === state.algorithm));
+  $('btnWebcam').setAttribute('aria-pressed', String(!!state.webcam));
+  $('helpText').textContent = !state.webcam
+    ? 'Klicken und ziehen, um die Glitch-Position zu wählen. Mausrad oder Leertaste würfelt neu.'
+    : state.webcam.frozen
+      ? 'Standbild. Mausrad würfelt neu, Leertaste setzt die Webcam fort, W beendet sie.'
+      : 'Webcam live. Klicken und ziehen wählt die Glitch-Position, Leertaste friert ein, W beendet.';
+}
+
+/* ---------- Glitch-Kern ---------- */
+function applyAlgorithm(oldByte, bit) {
+  switch (state.algorithm) {
+    case 'one':  return (oldByte | bit) & 0xff;
+    case 'zero': return (oldByte & ~bit) & 0xff;
+    default:     return (oldByte ^ bit) & 0xff;
+  }
+}
+
+function encodeJpeg(canvas, quality) {
+  return new Promise((resolve, reject) =>
+    canvas.toBlob(b => b ? resolve(b) : reject(new Error('JPEG-Kodierung fehlgeschlagen')), 'image/jpeg', quality));
+}
+
+function decodeImage(blob) {
+  // Erst createImageBitmap probieren, sonst <img>; Browser-Decoder sind bei kaputten Daten meist gnädig.
+  return createImageBitmap(blob).catch(() => new Promise(resolve => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img.naturalWidth ? img : null); };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.src = url;
+  }));
+}
+
+async function glitchOnce() {
+  if (!state.source) return;
+
+  const q = +ui.quality.value;
+  if (!state.encoded || state.encodedQuality !== q) {
+    const blob = await encodeJpeg(state.source, q / 100);
+    state.encoded = new Uint8Array(await blob.arrayBuffer());
+    state.encodedQuality = q;
+  }
+  const raw = state.encoded.slice();
+  const n = raw.length;
+
+  // JPEG-Header überspringen (Quantisierungs- und Huffman-Tabellen …) bis hinter den SOS-Marker FF DA
+  let headerSize = 0;
+  for (let i = 0; i < n - 1; ++i) {
+    if (raw[i] === 0xff && raw[i + 1] === 0xda) { headerSize = i + 2; break; }
+  }
+  const firstPos = Math.min(n - 3, headerSize + Math.floor((n - headerSize) * relPosition()));
+
+  if (ui.fixedSeed.checked) rng.seed(+ui.seed.value);
+
+  if (ui.singleBit.checked) {
+    const oldByte = raw[firstPos];
+    const bit = 1 << (state.flipBit++ % 8);
+    const newByte = applyAlgorithm(oldByte, bit);
+    raw[firstPos] = (newByte === 0xff && ui.preventFF.checked) ? oldByte : newByte;
+  } else {
+    const N = +ui.iterations.value;
+    for (let i = 0; i < N; ++i) {
+      const pos = rng.int(firstPos, n - 3);
+      const oldByte = raw[pos];
+      if (ui.leaveFF.checked && oldByte === 0xff) continue;
+      const bit = 1 << (rng.next() % 8);
+      const newByte = applyAlgorithm(oldByte, bit);
+      raw[pos] = (newByte === 0xff && ui.preventFF.checked) ? oldByte : newByte;
+    }
+  }
+
+  const blob = new Blob([raw], { type: 'image/jpeg' });
+  const img = await decodeImage(blob);
+  if (!img) {
+    // Im Webcam-Modus einfach das letzte gute Bild stehen lassen
+    if (!state.webcam) status('Dieses Glitch-Ergebnis konnte der Browser nicht dekodieren – einfach neu würfeln.', { error: true });
+    return;
+  }
+  if (state.glitched && typeof state.glitched.close === 'function') state.glitched.close();
+  state.glitched = img;
+  state.glitchedRaw = blob;
+  draw();
+  if (!state.webcam) {
+    status('Ergebnisgröße: ' + n.toLocaleString('de-DE') + ' Bytes');
+    saveSettings();
+  }
+}
+
+// Aktualisierungen bündeln, damit beim Ziehen der Slider keine Jobs auflaufen
+let busy = false, dirty = false;
+async function requestUpdate() {
+  syncUi();
+  if (state.webcam) {
+    // Die Webcam-Schleife rendert ohnehin laufend; nur bei Standbild einmal neu glitchen
+    saveSettings();
+    if (!state.webcam.frozen) return;
+  }
+  dirty = true;
+  if (busy) return;
+  busy = true;
+  while (dirty) {
+    dirty = false;
+    try { await glitchOnce(); }
+    catch (e) { console.error(e); status(e.message || String(e), { error: true }); }
+  }
+  busy = false;
+}
+
+/* ---------- Zeichnen ---------- */
+function resizeCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  const r = ui.stage.getBoundingClientRect();
+  ui.canvas.width = Math.max(1, Math.round(r.width * dpr));
+  ui.canvas.height = Math.max(1, Math.round(r.height * dpr));
+  draw();
+}
+
+function draw() {
+  const dpr = window.devicePixelRatio || 1;
+  const cw = ui.canvas.width / dpr, ch = ui.canvas.height / dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, cw, ch);
+  const img = state.glitched;
+  if (!img) return;
+  const iw = img.width || img.naturalWidth, ih = img.height || img.naturalHeight;
+  const ia = iw / ih, wa = cw / ch;
+  let w, h;
+  if (wa < ia) { w = cw; h = cw / ia; } else { h = ch; w = ch * ia; }
+  const d = state.dest = { x: (cw - w) / 2, y: (ch - h) / 2, w, h };
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, d.x, d.y, d.w, d.h);
+  if (!state.webcam) ui.info.textContent = `${iw} × ${ih} px`;
+}
+
+/* ---------- Webcam ---------- */
+const WEBCAM_MAX_WIDTH = 960;   // größere Frames kosten nur Zeit beim Kodieren/Dekodieren
+
+function nextFrame() {
+  const v = state.webcam && state.webcam.video;
+  if (v && 'requestVideoFrameCallback' in v)
+    return new Promise(res => v.requestVideoFrameCallback(() => res()));
+  return new Promise(res => requestAnimationFrame(() => res()));
+}
+
+function grabFrame() {
+  const { video } = state.webcam;
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return false;
+  const scale = Math.min(1, WEBCAM_MAX_WIDTH / vw);
+  const w = Math.round(vw * scale), h = Math.round(vh * scale);
+  let c = state.source;
+  if (!c || c === state.webcam.prevSource || c.width !== w || c.height !== h) {
+    c = document.createElement('canvas');
+    c.width = w; c.height = h;
+  }
+  const g = c.getContext('2d');
+  g.setTransform(-1, 0, 0, 1, w, 0);   // spiegeln wie ein Spiegel/Selfie
+  g.drawImage(video, 0, 0, w, h);
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  state.source = c;
+  state.encoded = null;
+  return true;
+}
+
+async function webcamLoop() {
+  const cam = state.webcam;
+  while (state.webcam === cam) {
+    if (!cam.frozen && grabFrame()) {
+      try { await glitchOnce(); } catch (e) { console.error(e); }
+      ++cam.frames;
+      const now = performance.now();
+      if (now - cam.t0 >= 1000) {
+        ui.info.textContent = `Webcam ${state.source.width} × ${state.source.height} px · ${(cam.frames * 1000 / (now - cam.t0)).toFixed(1)} fps`;
+        cam.frames = 0; cam.t0 = now;
+      }
+    }
+    await nextFrame();
+  }
+}
+
+async function startWebcam() {
+  if (state.webcam) return;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    status('Dieser Browser bietet keinen Kamerazugriff (evtl. über http://localhost statt file:// öffnen).', { error: true, timeout: 6000 });
+    return;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+      audio: false,
+    });
+  } catch (e) {
+    const msg = e.name === 'NotAllowedError' ? 'Kamerazugriff wurde verweigert.'
+              : e.name === 'NotFoundError' ? 'Keine Kamera gefunden.'
+              : 'Webcam konnte nicht gestartet werden: ' + e.message;
+    status(msg, { error: true, timeout: 6000 });
+    return;
+  }
+  const video = document.createElement('video');
+  video.muted = true;
+  video.playsInline = true;
+  video.srcObject = stream;
+  try { await video.play(); } catch (_) { /* startet meist trotzdem */ }
+  state.webcam = {
+    stream, video, frozen: false, frames: 0, t0: performance.now(),
+    prevSource: state.source, prevName: state.sourceName,
+  };
+  state.sourceName = 'webcam';
+  syncUi();
+  status('Webcam läuft. Leertaste friert das Bild ein, „Speichern“ sichert den aktuellen Frame.', { timeout: 5000 });
+  webcamLoop();
+}
+
+function stopWebcam({ restore = true } = {}) {
+  const cam = state.webcam;
+  if (!cam) return;
+  state.webcam = null;
+  cam.stream.getTracks().forEach(t => t.stop());
+  cam.video.srcObject = null;
+  if (restore) {
+    state.source = cam.prevSource;
+    state.sourceName = cam.prevName;
+    state.encoded = null;
+    requestUpdate();
+  }
+  syncUi();
+}
+
+function toggleWebcam() { state.webcam ? stopWebcam() : startWebcam(); }
+
+function toggleFreeze() {
+  const cam = state.webcam;
+  cam.frozen = !cam.frozen;
+  syncUi();
+  status(cam.frozen ? 'Standbild – die Regler wirken weiter, Leertaste setzt fort.' : 'Webcam läuft wieder.', { timeout: 2500 });
+}
+
+/* ---------- Bilder laden ---------- */
+async function loadImage(blob, name) {
+  stopWebcam({ restore: false });
+  try {
+    const bmp = await createImageBitmap(blob);
+    const c = document.createElement('canvas');
+    c.width = bmp.width; c.height = bmp.height;
+    const cx = c.getContext('2d');
+    cx.fillStyle = '#fff';                // JPEG kennt keine Transparenz
+    cx.fillRect(0, 0, c.width, c.height);
+    cx.drawImage(bmp, 0, 0);
+    bmp.close();
+    state.source = c;
+    state.sourceName = (name || 'qlitch').replace(/\.[^.]+$/, '');
+    state.encoded = null;
+    status(`Bild geladen: ${name || 'Zwischenablage'}`);
+    requestUpdate();
+  } catch (e) {
+    console.error(e);
+    status('Bild konnte nicht geladen werden.', { error: true });
+  }
+}
+
+function makeDefaultImage() {
+  const W = 1200, H = 800;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const bg = g.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, '#1b1f4a'); bg.addColorStop(.5, '#7b2cbf'); bg.addColorStop(1, '#ff8c42');
+  g.fillStyle = bg; g.fillRect(0, 0, W, H);
+  const r = new MersenneTwister(4711);
+  for (let i = 0; i < 28; ++i) {
+    const x = r.int(0, W), y = r.int(0, H), rad = r.int(30, 220);
+    const rg = g.createRadialGradient(x - rad / 3, y - rad / 3, rad / 10, x, y, rad);
+    const hue = r.int(0, 360);
+    rg.addColorStop(0, `hsla(${hue},90%,75%,.95)`);
+    rg.addColorStop(1, `hsla(${(hue + 40) % 360},80%,35%,0)`);
+    g.fillStyle = rg;
+    g.beginPath(); g.arc(x, y, rad, 0, Math.PI * 2); g.fill();
+  }
+  g.strokeStyle = 'rgba(255,255,255,.12)'; g.lineWidth = 1;
+  for (let x = 0; x <= W; x += 40) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+  for (let y = 0; y <= H; y += 40) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
+  g.font = '800 200px system-ui, sans-serif';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = 'rgba(0,0,0,.35)'; g.fillText('QLITCH', W / 2 + 8, H / 2 + 8);
+  g.fillStyle = '#fff'; g.fillText('QLITCH', W / 2, H / 2);
+  state.source = c;
+  state.sourceName = 'qlitch';
+  state.encoded = null;
+}
+
+/* ---------- Speichern & Zwischenablage ---------- */
+function glitchedPng() {
+  const img = state.glitched;
+  const c = document.createElement('canvas');
+  c.width = img.width || img.naturalWidth;
+  c.height = img.height || img.naturalHeight;
+  c.getContext('2d').drawImage(img, 0, 0);
+  return new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('PNG-Export fehlgeschlagen')), 'image/png'));
+}
+
+function download(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+async function savePng() {
+  if (!state.glitched) return;
+  download(await glitchedPng(), `${state.sourceName}-glitched.png`);
+  status('Bild gespeichert.');
+}
+
+function saveRaw() {
+  if (!state.glitchedRaw) return;
+  download(state.glitchedRaw, `${state.sourceName}-glitched.jpg`);
+  status('Kaputte JPEG-Rohdaten gespeichert (nicht jeder Bildbetrachter zeigt sie an).', { timeout: 5000 });
+}
+
+async function copyToClipboard() {
+  if (!state.glitched) return;
+  try {
+    if (!window.ClipboardItem || !navigator.clipboard?.write) throw new Error('nicht unterstützt');
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': glitchedPng() })]);
+    status('Bild in die Zwischenablage kopiert.', { timeout: 5000 });
+  } catch (e) {
+    status('Kopieren in die Zwischenablage ist hier nicht möglich.', { error: true });
+  }
+}
+
+async function pasteFromClipboardButton() {
+  try {
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      const type = item.types.find(t => t.startsWith('image/'));
+      if (type) return loadImage(await item.getType(type), 'Zwischenablage');
+    }
+    status('Kein Bild in der Zwischenablage.', { error: true });
+  } catch (e) {
+    status('Zugriff auf die Zwischenablage verweigert – probier Strg+V.', { error: true });
+  }
+}
+
+/* ---------- Ereignisse ---------- */
+for (const id of ['percentage', 'iterations', 'quality', 'seed'])
+  ui[id].addEventListener('input', requestUpdate);
+for (const id of ['fixedSeed', 'singleBit', 'preventFF', 'leaveFF'])
+  ui[id].addEventListener('change', requestUpdate);
+ui.showHelp.addEventListener('change', () => { syncUi(); saveSettings(); });
+
+function setAlgorithm(a) {
+  state.algorithm = a;
+  status('Algorithmus: ' + ({ xor: 'XOR', one: 'Eins', zero: 'Null' })[a], { timeout: 1000 });
+  requestUpdate();
+}
+for (const b of document.querySelectorAll('[data-alg]'))
+  b.addEventListener('click', () => setAlgorithm(b.dataset.alg));
+
+$('btnOpen').addEventListener('click', () => ui.fileInput.click());
+ui.fileInput.addEventListener('change', () => {
+  const f = ui.fileInput.files[0];
+  if (f) loadImage(f, f.name);
+  ui.fileInput.value = '';
+});
+$('btnSave').addEventListener('click', savePng);
+$('btnSaveRaw').addEventListener('click', saveRaw);
+$('btnCopy').addEventListener('click', copyToClipboard);
+$('btnPaste').addEventListener('click', pasteFromClipboardButton);
+$('btnGlitch').addEventListener('click', requestUpdate);
+$('btnWebcam').addEventListener('click', toggleWebcam);
+$('btnAbout').addEventListener('click', () => ui.about.showModal());
+
+// Position per Maus/Touch wählen
+function pickPosition(e) {
+  const r = ui.canvas.getBoundingClientRect();
+  const d = state.dest;
+  if (!d.w || !d.h) return;
+  const x = Math.min(Math.max(e.clientX - r.left - d.x, 0), d.w);
+  const y = Math.min(Math.max(e.clientY - r.top - d.y, 0), d.h);
+  const rel = Math.min(1, (Math.floor(x) + Math.floor(y) * d.w) / (d.w * d.h));
+  const p = ui.percentage;
+  p.value = Math.round(+p.min + rel * (p.max - p.min));
+  requestUpdate();
+}
+ui.canvas.addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;
+  state.pointerDown = true;
+  ui.canvas.setPointerCapture(e.pointerId);
+  pickPosition(e);
+});
+ui.canvas.addEventListener('pointermove', e => { if (state.pointerDown) pickPosition(e); });
+ui.canvas.addEventListener('pointerup', () => { state.pointerDown = false; });
+ui.canvas.addEventListener('pointercancel', () => { state.pointerDown = false; });
+ui.canvas.addEventListener('wheel', e => { e.preventDefault(); requestUpdate(); }, { passive: false });
+
+// Drag & Drop
+let dragDepth = 0;
+ui.stage.addEventListener('dragenter', e => { e.preventDefault(); dragDepth++; ui.stage.classList.add('dragging'); });
+ui.stage.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+ui.stage.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; ui.stage.classList.remove('dragging'); } });
+ui.stage.addEventListener('drop', e => {
+  e.preventDefault();
+  dragDepth = 0; ui.stage.classList.remove('dragging');
+  const f = [...e.dataTransfer.files].find(f => f.type.startsWith('image/'));
+  if (f) loadImage(f, f.name);
+  else status('Bitte eine Bilddatei ablegen.', { error: true });
+});
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop', e => e.preventDefault());
+
+// Einfügen per Strg+V
+document.addEventListener('paste', e => {
+  const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+  if (item) { e.preventDefault(); loadImage(item.getAsFile(), 'Zwischenablage'); }
+});
+
+// Tastatur
+window.addEventListener('keydown', e => {
+  if (ui.about.open) return;
+  const mod = e.ctrlKey || e.metaKey;
+  const k = e.key.toLowerCase();
+  if (mod && k === 'o') { e.preventDefault(); ui.fileInput.click(); return; }
+  if (mod && k === 's') { e.preventDefault(); savePng(); return; }
+  if (mod && k === 'c' && !String(window.getSelection())) { e.preventDefault(); copyToClipboard(); return; }
+  if (mod || e.altKey) return;
+  switch (k) {
+    case ' ': e.preventDefault(); state.webcam ? toggleFreeze() : requestUpdate(); break;
+    case 'w': toggleWebcam(); break;
+    case 'x': setAlgorithm('xor'); break;
+    case '1': setAlgorithm('one'); break;
+    case '0': setAlgorithm('zero'); break;
+    case 'm': ui.singleBit.checked = !ui.singleBit.checked; requestUpdate(); break;
+    case 'h': ui.showHelp.checked = !ui.showHelp.checked; syncUi(); saveSettings(); break;
+    default: return;
+  }
+});
+
+new ResizeObserver(resizeCanvas).observe(ui.stage);
+
+/* ---------- Start ---------- */
+restoreSettings();
+syncUi();
+makeDefaultImage();
+requestUpdate();
+</script>
+</body>
+</html>

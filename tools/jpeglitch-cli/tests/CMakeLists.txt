@@ -1,0 +1,4 @@
+add_executable(jpeglitch_test_codec_robustness test_codec_robustness.c)
+target_link_libraries(jpeglitch_test_codec_robustness PRIVATE jpeglitch-glitch-core jpeglitch-codec)
+set_target_properties(jpeglitch_test_codec_robustness PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
+add_test(NAME codec_robustness COMMAND jpeglitch_test_codec_robustness)
