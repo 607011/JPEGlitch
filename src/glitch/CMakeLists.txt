@@ -12,7 +12,10 @@ if(NOT TARGET jpeglitch-glitch-core)
   if(NOT WIN32)
     target_link_libraries(jpeglitch-glitch-core PUBLIC m)
   endif()
-  set_target_properties(jpeglitch-glitch-core PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
+  set_target_properties(
+    jpeglitch-glitch-core
+    PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON
+  )
 
   option(JPEGLITCH_BUILD_TESTS "Build jpeglitch-glitch-core unit tests" ${PROJECT_IS_TOP_LEVEL})
   if(JPEGLITCH_BUILD_TESTS)

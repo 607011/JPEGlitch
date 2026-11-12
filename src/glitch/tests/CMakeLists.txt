@@ -1,4 +1,11 @@
-set(JPEGLITCH_TESTS mt19937 header determinism eoi ff_options)
+set(
+  JPEGLITCH_TESTS
+  mt19937
+  header
+  determinism
+  eoi
+  ff_options
+)
 
 foreach(test_name ${JPEGLITCH_TESTS})
   add_executable(jpeglitch_test_${test_name} test_${test_name}.c)

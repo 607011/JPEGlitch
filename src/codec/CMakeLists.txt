@@ -12,5 +12,8 @@ if(NOT TARGET jpeglitch-codec)
   add_library(jpeglitch-codec STATIC jpeglitch_codec.c)
   target_include_directories(jpeglitch-codec PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
   target_link_libraries(jpeglitch-codec PUBLIC jpeglitch::turbojpeg)
-  set_target_properties(jpeglitch-codec PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
+  set_target_properties(
+    jpeglitch-codec
+    PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON
+  )
 endif()
