@@ -22,7 +22,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <stdlib.h>
 
 int jpeglitch_codec_decode(tjhandle handle, const uint8_t *jpeg, size_t jpeg_size, int pixel_format, uint8_t **out,
-			size_t *out_capacity, int *out_w, int *out_h)
+			   size_t *out_capacity, int *out_w, int *out_h)
 {
 	tj3Set(handle, TJPARAM_STOPONWARNING, 0);
 

@@ -40,7 +40,7 @@ extern "C" {
  * warning -- expected for glitched data -- or -1 on a fatal decode error
  * (out_w/out_h are left untouched in that case). */
 int jpeglitch_codec_decode(tjhandle handle, const uint8_t *jpeg, size_t jpeg_size, int pixel_format, uint8_t **out,
-			size_t *out_capacity, int *out_w, int *out_h);
+			   size_t *out_capacity, int *out_w, int *out_h);
 
 #ifdef __cplusplus
 }
