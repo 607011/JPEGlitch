@@ -169,7 +169,8 @@ static void jpeglitch_filter_get_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, S_PATTERN_HOLD, 1);
 }
 
-static bool jpeglitch_filter_fixed_seed_modified(obs_properties_t *props, obs_property_t *property, obs_data_t *settings)
+static bool jpeglitch_filter_fixed_seed_modified(obs_properties_t *props, obs_property_t *property,
+						 obs_data_t *settings)
 {
 	UNUSED_PARAMETER(property);
 	obs_property_t *seed_prop = obs_properties_get(props, S_SEED);
