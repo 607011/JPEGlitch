@@ -122,14 +122,25 @@ an ASan-instrumented libobs build.
 
 ## Design decisions worth knowing about
 
-* **The filter never mutates the incoming `obs_source_frame` in place.**
-  libobs's `async_tick()` can call `filter_video()` more than once on the
-  *same* cached frame object (e.g. if the display refresh rate exceeds the
-  capture frame rate); in-place mutation would re-glitch an already
-  glitched frame every repeat tick. The filter instead owns a separate,
-  reused `out_frame` and returns either that or the untouched original
-  (pass-through) -- see the comment block at the top of
-  `src/jpeglitch-filter.c`.
+* **The filter mutates the incoming `obs_source_frame` in place and always
+  returns it.** An earlier version instead returned its own, separately
+  owned `out_frame` -- a seemingly reasonable way to avoid re-glitching an
+  already-glitched frame when `async_tick()` redelivers the same cached
+  frame object (e.g. when the display refresh rate exceeds the capture
+  frame rate). In practice this broke libobs's own refcounting: 
+  `filter_frame()` in libobs/obs-source.c increments the *incoming*
+  frame's refs before running the filter chain and decrements whatever
+  the chain *returns*. Returning a different object left the original
+  frame's refcount permanently bumped, so libobs's async frame cache
+  could never mark that slot free again -- every tick allocated a brand
+  new frame and leaked it. Confirmed live: OBS's memory ballooned to
+  14-17GB within a few minutes with only this filter active (~440k
+  still-reachable allocations per `leaks`, ~20,600 leaked objects per
+  OBS's own shutdown tracker). Fixed by mutating `frame` directly; the
+  "don't re-glitch" and "fall back to the last good frame on a fatal
+  decode error" behaviors are now implemented via a timestamp check and
+  a small plain-memory cache of the last good planes, respectively --
+  see the comment block at the top of `src/jpeglitch-filter.c`.
 * **TurboJPEG's `TJPARAM_QUALITY` only accepts 1-100**, not the project
   spec's UI range of 0-100; the value is clamped at the boundary in both
   `tools/jpeglitch-cli` and the filter (not in the OBS property itself, so the
