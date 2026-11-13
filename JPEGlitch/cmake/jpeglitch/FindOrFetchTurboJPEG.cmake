@@ -93,6 +93,15 @@ else()
     -DWITH_SIMD=OFF
   )
 
+  if(WIN32)
+    # Without this, libjpeg-turbo's own CMakeLists.txt falls back to the
+    # static MSVC runtime (LIBCMT) while the rest of this build -- and the
+    # prebuilt OBS/Qt dependencies it links against -- use the dynamic one,
+    # which the linker promotes from a warning (LNK4098) to a hard error
+    # (LNK1218) under this project's warnings-as-errors setting.
+    list(APPEND _jpeglitch_tj_cmake_args -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL)
+  endif()
+
   list(LENGTH CMAKE_OSX_ARCHITECTURES _jpeglitch_osx_build_arch_count)
   if(_jpeglitch_osx_build_arch_count GREATER 1)
     # libjpeg-turbo's own build explicitly refuses more than one value in
