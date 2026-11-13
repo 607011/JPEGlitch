@@ -19,27 +19,34 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 Architecture notes (see jpeglitch-obs-prompt.md for the full spec):
 
-* filter_video() is called by libobs's async_tick() on `source->cur_async_frame`,
-  the frame picked from the source's own cache by closest timestamp. That same
-  cached frame object can be handed to filter_video() again on a later tick if
-  no newer capture frame has arrived yet (e.g. display refresh rate > capture
-  frame rate). Mutating `frame`'s pixel buffer in place would therefore
-  re-glitch an already-glitched frame on every repeat tick, compounding
-  corruption instead of reapplying a clean one-shot glitch.
-  -> This filter NEVER writes to the incoming `frame`. It only reads from it,
-     and returns either its own, separately owned `out_frame` (the glitched
-     result) or the original `frame` pointer unmodified (pass-through). This
-     also makes the "last good result, else pass through" fallback trivial:
-     since `frame` is never touched, pass-through is just returning it as-is.
-  -> `out_frame->timestamp` is compared against the incoming frame's
-     timestamp: if they match, the exact same source frame was already
-     glitched on a previous tick, and the cached `out_frame` is returned
-     without redoing any work.
+* filter_video() must return either the exact frame object it was given
+  (mutated or not) or NULL. Returning a different, filter-owned frame
+  object -- which an earlier version of this filter did, to avoid
+  re-glitching an already-glitched frame on a repeat tick -- breaks
+  libobs's own refcounting: `filter_frame()` in libobs/obs-source.c
+  increments the *incoming* frame's refs before calling the filter chain
+  and decrements whatever the chain *returns*. If that's a different
+  object, the incoming frame's refcount is permanently bumped and never
+  settles back down, which stops libobs from ever reclaiming that cache
+  slot -- a severe, fast memory leak (confirmed live: multiple GB per
+  minute). So: this filter mutates `frame`'s own pixel buffers in place
+  and always returns `frame` itself.
+  -> To still avoid double-glitching the same cached frame on a repeat
+     tick (same object handed back by async_tick() before a new capture
+     frame arrives), `last_processed_timestamp` remembers the timestamp
+     of the frame we last mutated; if the incoming frame's timestamp
+     matches, it's that same already-processed object, so we return it
+     untouched instead of glitching it again.
+  -> To still support "fatal decode error -> show the last good frame"
+     (the new frame may come from a different, freshly-cached slot by
+     then), we keep our own small fallback copy of the last successfully
+     glitched planes (`last_good_*`) and write that into `frame` instead,
+     rather than owning a separate `obs_source_frame`.
 
 * update() (settings/UI thread) and filter_video() (video thread) can run
   concurrently. `param_mutex` protects the `jpeglitch_params` snapshot; everything
-  else (`state`, TurboJPEG handles, scratch buffers, `out_frame`) is only ever
-  touched from filter_video() on the video thread and needs no locking.
+  else (`state`, TurboJPEG handles, scratch buffers) is only ever touched
+  from filter_video() on the video thread and needs no locking.
 */
 
 #include <obs-module.h>
@@ -98,15 +105,22 @@ struct jpeglitch_filter {
 	uint8_t *chroma_a; /* de-interleaved U (encode) / decoded U (decode), size chroma_capacity */
 	uint8_t *chroma_b; /* same for V */
 	size_t chroma_capacity;
-	uint8_t *luma_scratch; /* de-interleaved Y for packed formats (UYVY); unused for planar-Y formats (NV12) */
+	uint8_t *luma_scratch; /* de-interleaved/decoded Y scratch, size luma_capacity */
 	size_t luma_capacity;
+
+	/* A copy of the last successfully glitched planes, same layout/sizing
+	 * as chroma_a/chroma_b/luma_scratch above, used to re-fill `frame` on
+	 * a fatal encode/decode error instead of owning a separate frame. */
+	uint8_t *last_good_luma;
+	uint8_t *last_good_chroma_a;
+	uint8_t *last_good_chroma_b;
+	bool have_last_good;
 
 	uint8_t *jpeg_buf; /* allocated/reallocated by TurboJPEG itself (tj3Alloc); free with tj3Free */
 	size_t jpeg_size;
 
-	struct obs_source_frame *out_frame; /* owned; reused while cur_w/cur_h don't change */
-	bool have_output;
-	uint64_t last_input_timestamp;
+	bool last_processed_valid;
+	uint64_t last_processed_timestamp;
 
 	bool logged_unsupported_format;
 };
@@ -251,11 +265,12 @@ static void jpeglitch_filter_destroy(void *data)
 		tj3Destroy(filter->enc);
 	if (filter->dec)
 		tj3Destroy(filter->dec);
-	if (filter->out_frame)
-		obs_source_frame_destroy(filter->out_frame);
 	bfree(filter->chroma_a);
 	bfree(filter->chroma_b);
 	bfree(filter->luma_scratch);
+	bfree(filter->last_good_chroma_a);
+	bfree(filter->last_good_chroma_b);
+	bfree(filter->last_good_luma);
 	if (filter->jpeg_buf)
 		tj3Free(filter->jpeg_buf);
 	pthread_mutex_destroy(&filter->param_mutex);
@@ -276,43 +291,42 @@ static int subsamp_for_format(enum video_format format)
 	}
 }
 
+/* Chroma plane dimensions for the formats this filter supports. */
+static void chroma_dims(enum video_format format, int w, int h, int *cw, int *ch)
+{
+	int subsamp = subsamp_for_format(format);
+	*cw = tjPlaneWidth(1, w, subsamp);
+	*ch = tjPlaneHeight(1, h, subsamp);
+}
+
 static bool ensure_buffers(struct jpeglitch_filter *filter, enum video_format format, uint32_t w, uint32_t h)
 {
-	if (filter->out_frame && filter->cur_format == format && filter->cur_w == w && filter->cur_h == h)
+	if (filter->cur_format == format && filter->cur_w == w && filter->cur_h == h)
 		return true;
 
-	if (filter->out_frame) {
-		obs_source_frame_destroy(filter->out_frame);
-		filter->out_frame = NULL;
-	}
-	filter->out_frame = obs_source_frame_create(format, w, h);
-	if (!filter->out_frame)
-		return false;
-
-	int subsamp = subsamp_for_format(format);
-	int cw = tjPlaneWidth(1, (int)w, subsamp);
-	int ch = tjPlaneHeight(1, (int)h, subsamp);
-	size_t needed = (size_t)cw * (size_t)ch;
-	if (needed > filter->chroma_capacity) {
-		filter->chroma_a = brealloc(filter->chroma_a, needed);
-		filter->chroma_b = brealloc(filter->chroma_b, needed);
-		filter->chroma_capacity = needed;
+	int cw, ch;
+	chroma_dims(format, (int)w, (int)h, &cw, &ch);
+	size_t chroma_needed = (size_t)cw * (size_t)ch;
+	if (chroma_needed > filter->chroma_capacity) {
+		filter->chroma_a = brealloc(filter->chroma_a, chroma_needed);
+		filter->chroma_b = brealloc(filter->chroma_b, chroma_needed);
+		filter->last_good_chroma_a = brealloc(filter->last_good_chroma_a, chroma_needed);
+		filter->last_good_chroma_b = brealloc(filter->last_good_chroma_b, chroma_needed);
+		filter->chroma_capacity = chroma_needed;
 	}
 
-	/* Only packed formats (UYVY) need a separate Y scratch buffer; planar
-	 * formats (NV12) read/write Y directly from/to the frame's own plane. */
-	if (format == VIDEO_FORMAT_UYVY) {
-		size_t luma_needed = (size_t)w * (size_t)h;
-		if (luma_needed > filter->luma_capacity) {
-			filter->luma_scratch = brealloc(filter->luma_scratch, luma_needed);
-			filter->luma_capacity = luma_needed;
-		}
+	size_t luma_needed = (size_t)w * (size_t)h;
+	if (luma_needed > filter->luma_capacity) {
+		filter->luma_scratch = brealloc(filter->luma_scratch, luma_needed);
+		filter->last_good_luma = brealloc(filter->last_good_luma, luma_needed);
+		filter->luma_capacity = luma_needed;
 	}
 
 	filter->cur_format = format;
 	filter->cur_w = w;
 	filter->cur_h = h;
-	filter->have_output = false;
+	filter->have_last_good = false;
+	filter->last_processed_valid = false;
 	return true;
 }
 
@@ -407,10 +421,11 @@ static void glitch_with_pattern_hold(struct jpeglitch_filter *filter, uint8_t *r
 }
 
 /* Encodes frame's Y/UV planes to JPEG, glitches the bitstream, and decodes
- * back into filter->out_frame. Returns true on success (including "succeeded
+ * back into scratch buffers. Returns true on success (including "succeeded
  * despite a decode warning", expected for glitched data); false only on a
- * fatal encode/decode error, in which case out_frame's content is unchanged
- * (the caller falls back to the last good frame, or to pass-through). */
+ * fatal encode/decode error. Either way, `frame` itself is never touched
+ * here -- the result lands in filter->luma_scratch/chroma_a/chroma_b, and
+ * the caller decides whether/how to commit that into `frame`. */
 static bool process_nv12_frame(struct jpeglitch_filter *filter, const struct obs_source_frame *frame,
 			       const struct jpeglitch_filter_params *params)
 {
@@ -438,8 +453,8 @@ static bool process_nv12_frame(struct jpeglitch_filter *filter, const struct obs
 
 	glitch_with_pattern_hold(filter, filter->jpeg_buf, filter->jpeg_size, params);
 
-	uint8_t *dst_planes[3] = {filter->out_frame->data[0], filter->chroma_a, filter->chroma_b};
-	int dst_strides[3] = {(int)filter->out_frame->linesize[0], cw, cw};
+	uint8_t *dst_planes[3] = {filter->luma_scratch, filter->chroma_a, filter->chroma_b};
+	int dst_strides[3] = {w, cw, cw};
 
 	tj3Set(filter->dec, TJPARAM_STOPONWARNING, 0);
 	if (tj3DecompressHeader(filter->dec, filter->jpeg_buf, filter->jpeg_size) < 0 &&
@@ -453,8 +468,6 @@ static bool process_nv12_frame(struct jpeglitch_filter *filter, const struct obs
 		return false;
 	}
 
-	interleave_nv12_uv(filter->chroma_a, filter->chroma_b, cw, ch, filter->out_frame->data[1],
-			   filter->out_frame->linesize[1]);
 	return true;
 }
 
@@ -499,9 +512,26 @@ static bool process_uyvy_frame(struct jpeglitch_filter *filter, const struct obs
 		return false;
 	}
 
-	interleave_uyvy(filter->luma_scratch, filter->chroma_a, filter->chroma_b, w, h, filter->out_frame->data[0],
-			filter->out_frame->linesize[0]);
 	return true;
+}
+
+/* Writes luma/chroma_a/chroma_b (whichever triple is passed in -- the fresh
+ * scratch buffers on success, or the cached last-good copy on fallback)
+ * into frame's own planes, honoring its real format/linesize. */
+static void commit_to_frame(struct obs_source_frame *frame, enum video_format format, const uint8_t *luma,
+			    const uint8_t *chroma_a, const uint8_t *chroma_b)
+{
+	int w = (int)frame->width, h = (int)frame->height;
+	int cw, ch;
+	chroma_dims(format, w, h, &cw, &ch);
+
+	if (format == VIDEO_FORMAT_NV12) {
+		for (int y = 0; y < h; ++y)
+			memcpy(frame->data[0] + (size_t)y * frame->linesize[0], luma + (size_t)y * w, (size_t)w);
+		interleave_nv12_uv(chroma_a, chroma_b, cw, ch, frame->data[1], frame->linesize[1]);
+	} else {
+		interleave_uyvy(luma, chroma_a, chroma_b, w, h, frame->data[0], frame->linesize[0]);
+	}
 }
 
 static struct obs_source_frame *jpeglitch_filter_video(void *data, struct obs_source_frame *frame)
@@ -519,10 +549,11 @@ static struct obs_source_frame *jpeglitch_filter_video(void *data, struct obs_so
 		return frame;
 	}
 
-	/* Same cached frame as last tick -> already glitched, return the
-	 * cached result instead of corrupting it further. */
-	if (filter->have_output && frame->timestamp == filter->last_input_timestamp)
-		return filter->out_frame;
+	/* Same cached frame object as last tick -> we already mutated it in
+	 * place on a previous call; return it as-is instead of glitching it
+	 * again. */
+	if (filter->last_processed_valid && frame->timestamp == filter->last_processed_timestamp)
+		return frame;
 
 	struct jpeglitch_filter_params params;
 	pthread_mutex_lock(&filter->param_mutex);
@@ -534,24 +565,29 @@ static struct obs_source_frame *jpeglitch_filter_video(void *data, struct obs_so
 
 	bool ok = frame->format == VIDEO_FORMAT_NV12 ? process_nv12_frame(filter, frame, &params)
 						     : process_uyvy_frame(filter, frame, &params);
-	if (!ok)
-		return filter->have_output ? filter->out_frame : frame;
 
-	/* Metadata that isn't part of the YUV content itself stays untouched,
-	 * per spec: only the pixel content goes through the codec. */
-	filter->out_frame->timestamp = frame->timestamp;
-	filter->out_frame->flip = frame->flip;
-	filter->out_frame->flags = frame->flags;
-	filter->out_frame->full_range = frame->full_range;
-	filter->out_frame->trc = frame->trc;
-	filter->out_frame->max_luminance = frame->max_luminance;
-	memcpy(filter->out_frame->color_matrix, frame->color_matrix, sizeof(frame->color_matrix));
-	memcpy(filter->out_frame->color_range_min, frame->color_range_min, sizeof(frame->color_range_min));
-	memcpy(filter->out_frame->color_range_max, frame->color_range_max, sizeof(frame->color_range_max));
+	int w = (int)frame->width, h = (int)frame->height;
+	int cw, ch;
+	chroma_dims(frame->format, w, h, &cw, &ch);
 
-	filter->last_input_timestamp = frame->timestamp;
-	filter->have_output = true;
-	return filter->out_frame;
+	if (ok) {
+		commit_to_frame(frame, frame->format, filter->luma_scratch, filter->chroma_a, filter->chroma_b);
+
+		/* Cache this result for the next fatal-error fallback. */
+		memcpy(filter->last_good_luma, filter->luma_scratch, (size_t)w * (size_t)h);
+		memcpy(filter->last_good_chroma_a, filter->chroma_a, (size_t)cw * (size_t)ch);
+		memcpy(filter->last_good_chroma_b, filter->chroma_b, (size_t)cw * (size_t)ch);
+		filter->have_last_good = true;
+	} else if (filter->have_last_good) {
+		commit_to_frame(frame, frame->format, filter->last_good_luma, filter->last_good_chroma_a,
+				filter->last_good_chroma_b);
+	}
+	/* else: no glitched or cached-good result available yet -- leave
+	 * frame's own (unglitched) content untouched, i.e. plain pass-through. */
+
+	filter->last_processed_timestamp = frame->timestamp;
+	filter->last_processed_valid = true;
+	return frame;
 }
 
 static struct obs_source_info jpeglitch_filter_source_info = {
