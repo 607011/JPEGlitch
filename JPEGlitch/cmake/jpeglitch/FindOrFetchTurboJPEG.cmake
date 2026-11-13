@@ -94,12 +94,13 @@ else()
   )
 
   if(WIN32)
-    # Without this, libjpeg-turbo's own CMakeLists.txt falls back to the
+    # libjpeg-turbo's own CMakeLists.txt has its own WITH_CRT_DLL option
+    # (default OFF) that overrides CMAKE_MSVC_RUNTIME_LIBRARY, selecting the
     # static MSVC runtime (LIBCMT) while the rest of this build -- and the
-    # prebuilt OBS/Qt dependencies it links against -- use the dynamic one,
-    # which the linker promotes from a warning (LNK4098) to a hard error
-    # (LNK1218) under this project's warnings-as-errors setting.
-    list(APPEND _jpeglitch_tj_cmake_args -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL)
+    # prebuilt OBS/Qt dependencies it links against -- use the dynamic one.
+    # The linker promotes that mismatch from a warning (LNK4098) to a hard
+    # error (LNK1218) under this project's warnings-as-errors setting.
+    list(APPEND _jpeglitch_tj_cmake_args -DWITH_CRT_DLL=ON)
   endif()
 
   list(LENGTH CMAKE_OSX_ARCHITECTURES _jpeglitch_osx_build_arch_count)
