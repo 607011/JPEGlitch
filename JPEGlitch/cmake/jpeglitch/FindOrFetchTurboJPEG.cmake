@@ -77,10 +77,9 @@ else()
   include(ExternalProject)
   set(_jpeglitch_tj_prefix "${CMAKE_BINARY_DIR}/_deps/libjpeg-turbo")
 
-  # SIMD needs NASM/yasm and gets fiddly to get right for a cross/universal
-  # build; turned off for now since the glitch filter's bottleneck is the
-  # byte-level corruption pass, not JPEG codec throughput. Revisit once
-  # milestone 4's performance measurements call for it.
+  # SIMD-accelerated encode/decode; needs NASM for the x86_64 SIMD sources
+  # (simd/x86_64, NASM-syntax assembly) -- arm64 NEON SIMD is compiled from
+  # C/intrinsics by the regular C compiler, no extra assembler needed.
   set(
     _jpeglitch_tj_cmake_args
     -DCMAKE_BUILD_TYPE=Release
@@ -90,7 +89,7 @@ else()
     -DENABLE_STATIC=ON
     -DWITH_TURBOJPEG=ON
     -DWITH_JAVA=OFF
-    -DWITH_SIMD=OFF
+    -DWITH_SIMD=ON
   )
 
   if(WIN32)

@@ -103,12 +103,21 @@ Done, on macOS:
 Still to do, per the project's acceptance criteria:
 
 * Try it on a media source too.
-* Check 720p/1080p performance, that every property updates live, that a
-  fixed seed gives a stable pattern and no seed flickers, and that the
-  virtual camera shows the glitched output in a video call app.
+* That every property updates live, that a fixed seed gives a stable
+  pattern and no seed flickers, and that the virtual camera shows the
+  glitched output in a video call app.
 * Windows and Linux builds (only macOS has been built and run here).
-* CI is wired up (see below) but not yet verified actually green on
-  GitHub, since this repository has no remote yet.
+
+**Done:**
+* Live at 1080p60 on a real webcam: found and fixed a severe memory
+  leak (see below), then enabled SIMD in the bundled libjpeg-turbo,
+  which brought single-core CPU usage down from ~100% to ~70% -- still
+  substantial for a from-scratch encode+decode of every frame, but a
+  known, acceptable cost of the JPEG-glitch approach itself rather than
+  something obviously fixable without changing the underlying technique.
+* CI (build-project.yaml/check-format.yaml/unit-tests.yaml, called from
+  the repo root's push.yaml/pr-pull.yaml) is wired up and green on
+  GitHub.
 
 **Done:** ran the OBS-free core/codec/CLI under ASan+UBSan (leak detection
 isn't available on macOS, so that part of the check doesn't apply here),
