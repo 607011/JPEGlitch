@@ -12,6 +12,7 @@ jobs:
     defaults:
       run:
         shell: bash
+        working-directory: JPEGlitch
     steps:
       - uses: actions/checkout@v4
         with:

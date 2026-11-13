@@ -99,6 +99,7 @@ runs:
     - name: Run Windows Packaging
       if: runner.os == 'Windows'
       shell: pwsh
+      working-directory: ${{ inputs.workingDirectory }}
       run: |
         # Run Windows Packaging
         if ( $Env:RUNNER_DEBUG -ne $null ) {

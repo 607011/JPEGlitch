@@ -76,6 +76,7 @@ runs:
     - name: Run Windows Build
       if: runner.os == 'Windows'
       shell: pwsh
+      working-directory: ${{ inputs.workingDirectory }}
       run: |
         # Run Windows Build
         if ( $Env:RUNNER_DEBUG -ne $null ) {

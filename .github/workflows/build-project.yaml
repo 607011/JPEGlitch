@@ -62,8 +62,8 @@ jobs:
           done
           echo "commitHash=${GITHUB_SHA:0:9}" >> $GITHUB_OUTPUT
 
-          plugin_name="$(grep 'name' buildspec.json | sed -E -e 's/^.+"name":[^"]+"(.+)",?$/\1/g')"
-          plugin_display_name="$(grep 'displayName' buildspec.json | sed -E -e 's/^.+"displayName":[^"]+"(.+)",?$/\1/g' || echo "")"
+          plugin_name="$(grep 'name' JPEGlitch/buildspec.json | sed -E -e 's/^.+"name":[^"]+"(.+)",?$/\1/g')"
+          plugin_display_name="$(grep 'displayName' JPEGlitch/buildspec.json | sed -E -e 's/^.+"displayName":[^"]+"(.+)",?$/\1/g' || echo "")"
 
           if [[ "${plugin_display_name}" ]]; then
             echo "pluginName=${plugin_display_name}" >> $GITHUB_OUTPUT
@@ -107,7 +107,7 @@ jobs:
           local product_name
           local product_version
           read -r product_name product_version <<< \
-            "$(jq -r '. | {name, version} | join(" ")' buildspec.json)"
+            "$(jq -r '. | {name, version} | join(" ")' JPEGlitch/buildspec.json)"
 
           print "pluginName=${product_name}" >> $GITHUB_OUTPUT
           print "pluginVersion=${product_version}" >> $GITHUB_OUTPUT
@@ -115,13 +115,13 @@ jobs:
       - uses: actions/cache/restore@v4
         id: ccache-cache
         with:
-          path: ${{ github.workspace }}/.ccache
+          path: ${{ github.workspace }}/JPEGlitch/.ccache
           key: ${{ runner.os }}-ccache-${{ needs.check-event.outputs.config }}
           restore-keys: |
             ${{ runner.os }}-ccache-
 
       - name: Set Up Codesigning 🔑
-        uses: ./.github/actions/setup-macos-codesigning
+        uses: ./JPEGlitch/.github/actions/setup-macos-codesigning
         if: fromJSON(needs.check-event.outputs.codesign)
         id: codesign
         with:
@@ -135,15 +135,16 @@ jobs:
           notarizationPassword: ${{ secrets.MACOS_NOTARIZATION_PASSWORD }}
 
       - name: Build Plugin 🧱
-        uses: ./.github/actions/build-plugin
+        uses: ./JPEGlitch/.github/actions/build-plugin
         with:
           target: macos-universal
           config: ${{ needs.check-event.outputs.config }}
           codesign: ${{ fromJSON(needs.check-event.outputs.codesign) }}
           codesignIdent: ${{ steps.codesign.outputs.codesignIdent }}
+          workingDirectory: ${{ github.workspace }}/JPEGlitch
 
       - name: Package Plugin 📀
-        uses: ./.github/actions/package-plugin
+        uses: ./JPEGlitch/.github/actions/package-plugin
         with:
           target: macos-universal
           config: ${{ needs.check-event.outputs.config }}
@@ -155,24 +156,25 @@ jobs:
           notarize: ${{ fromJSON(needs.check-event.outputs.notarize) && fromJSON(steps.codesign.outputs.haveNotarizationUser) }}
           codesignUser: ${{ secrets.MACOS_NOTARIZATION_USERNAME }}
           codesignPass: ${{ secrets.MACOS_NOTARIZATION_PASSWORD }}
+          workingDirectory: ${{ github.workspace }}/JPEGlitch
 
       - name: Upload Artifacts 📡
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-macos-universal-${{ needs.check-event.outputs.commitHash }}
-          path: ${{ github.workspace }}/release/${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-macos-universal.*
+          path: ${{ github.workspace }}/JPEGlitch/release/${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-macos-universal.*
 
       - name: Upload Debug Symbol Artifacts 🪲
         uses: actions/upload-artifact@v4
         if: ${{ needs.check-event.outputs.config == 'Release' }}
         with:
           name: ${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-macos-universal-${{ needs.check-event.outputs.commitHash }}-dSYMs
-          path: ${{ github.workspace }}/release/${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-macos-universal-dSYMs.*
+          path: ${{ github.workspace }}/JPEGlitch/release/${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-macos-universal-dSYMs.*
 
       - uses: actions/cache/save@v4
         if: github.event_name != 'pull_request' && steps.ccache-cache.outputs.cache-hit != 'true'
         with:
-          path: ${{ github.workspace }}/.ccache
+          path: ${{ github.workspace }}/JPEGlitch/.ccache
           key: ${{ runner.os }}-ccache-${{ needs.check-event.outputs.config }}
 
   ubuntu-build:
@@ -198,7 +200,7 @@ jobs:
           if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
 
           read -r product_name product_version <<< \
-            "$(jq -r '. | {name, version} | join(" ")' buildspec.json)"
+            "$(jq -r '. | {name, version} | join(" ")' JPEGlitch/buildspec.json)"
 
           echo "pluginName=${product_name}" >> $GITHUB_OUTPUT
           echo "pluginVersion=${product_version}" >> $GITHUB_OUTPUT
@@ -206,47 +208,49 @@ jobs:
       - uses: actions/cache/restore@v4
         id: ccache-cache
         with:
-          path: ${{ github.workspace }}/.ccache
+          path: ${{ github.workspace }}/JPEGlitch/.ccache
           key: ${{ runner.os }}-${{ matrix.os }}-ccache-x86_64-${{ needs.check-event.outputs.config }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.os }}-ccache-x86_64-
 
       - name: Build Plugin 🧱
-        uses: ./.github/actions/build-plugin
+        uses: ./JPEGlitch/.github/actions/build-plugin
         with:
           target: x86_64
           config: ${{ needs.check-event.outputs.config }}
+          workingDirectory: ${{ github.workspace }}/JPEGlitch
 
       - name: Package Plugin 📀
-        uses: ./.github/actions/package-plugin
+        uses: ./JPEGlitch/.github/actions/package-plugin
         with:
           target: x86_64
           config: ${{ needs.check-event.outputs.config }}
           package: ${{ fromJSON(needs.check-event.outputs.package) }}
+          workingDirectory: ${{ github.workspace }}/JPEGlitch
 
       - name: Upload Source Tarball 🗜️
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-${{ matrix.os }}-sources-${{ needs.check-event.outputs.commitHash }}
-          path: ${{ github.workspace }}/release/${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-source.*
+          path: ${{ github.workspace }}/JPEGlitch/release/${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-source.*
 
       - name: Upload Artifacts 📡
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-${{ matrix.os }}-x86_64-${{ needs.check-event.outputs.commitHash }}
-          path: ${{ github.workspace }}/release/${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-x86_64*.*
+          path: ${{ github.workspace }}/JPEGlitch/release/${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-x86_64*.*
 
       - name: Upload debug symbol artifacts 🪲
         uses: actions/upload-artifact@v4
         if: ${{ fromJSON(needs.check-event.outputs.package) }}
         with:
           name: ${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-${{ matrix.os }}-x86_64-${{ needs.check-event.outputs.commitHash }}-dbgsym
-          path: ${{ github.workspace }}/release/${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-x86_64*-dbgsym.ddeb
+          path: ${{ github.workspace }}/JPEGlitch/release/${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-x86_64*-dbgsym.ddeb
 
       - uses: actions/cache/save@v4
         if: github.event_name != 'pull_request' && steps.ccache-cache.outputs.cache-hit != 'true'
         with:
-          path: ${{ github.workspace }}/.ccache
+          path: ${{ github.workspace }}/JPEGlitch/.ccache
           key: ${{ runner.os }}-${{ matrix.os }}-ccache-x86_64-${{ needs.check-event.outputs.config }}
 
   windows-build:
@@ -270,7 +274,7 @@ jobs:
             Set-PSDebug -Trace 1
           }
 
-          $BuildSpec = Get-Content -Path buildspec.json -Raw | ConvertFrom-Json
+          $BuildSpec = Get-Content -Path JPEGlitch/buildspec.json -Raw | ConvertFrom-Json
           $ProductName = $BuildSpec.name
           $ProductVersion = $BuildSpec.version
 
@@ -278,20 +282,22 @@ jobs:
           "pluginVersion=${ProductVersion}" >> $env:GITHUB_OUTPUT
 
       - name: Build Plugin 🧱
-        uses: ./.github/actions/build-plugin
+        uses: ./JPEGlitch/.github/actions/build-plugin
         with:
           target: x64
           config: ${{ needs.check-event.outputs.config }}
+          workingDirectory: ${{ github.workspace }}/JPEGlitch
 
       - name: Package Plugin 📀
-        uses: ./.github/actions/package-plugin
+        uses: ./JPEGlitch/.github/actions/package-plugin
         with:
           target: x64
           config: ${{ needs.check-event.outputs.config }}
           package: ${{ fromJSON(needs.check-event.outputs.package) }}
+          workingDirectory: ${{ github.workspace }}/JPEGlitch
 
       - name: Upload Artifacts 📡
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-windows-x64-${{ needs.check-event.outputs.commitHash }}
-          path: ${{ github.workspace }}/release/${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-windows-x64*.*
+          path: ${{ github.workspace }}/JPEGlitch/release/${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-windows-x64*.*
